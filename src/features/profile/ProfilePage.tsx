@@ -18,6 +18,30 @@ import {
 
 const MY_TICKETS_KEY = ['my-support-tickets'];
 const MY_PROFILE_KEY = ['my-profile'];
+const COUNTRIES = [
+  { name: 'United States', code: '+1' },
+  { name: 'Ethiopia', code: '+251' },
+  { name: 'United Kingdom', code: '+44' },
+  { name: 'India', code: '+91' },
+  { name: 'Nigeria', code: '+234' },
+  { name: 'Kenya', code: '+254' },
+  { name: 'South Africa', code: '+27' },
+  { name: 'Australia', code: '+61' },
+  { name: 'Japan', code: '+81' },
+];
+
+function splitPhone(value?: string) {
+  const raw = (value ?? '').trim();
+  const match = raw.match(/^(\+\d{1,4})\s*(.*)$/);
+  if (match) {
+    return { code: match[1], number: match[2] };
+  }
+  return { code: '+1', number: raw };
+}
+
+function normalizeCountryCode(code: string) {
+  return COUNTRIES.some((country) => country.code === code) ? code : '+1';
+}
 
 export default function ProfilePage() {
   const { user, updateProfile } = useAuth();
@@ -26,7 +50,8 @@ export default function ProfilePage() {
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
-  const [phone, setPhone] = useState('');
+  const [countryCode, setCountryCode] = useState('+1');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [bio, setBio] = useState('');
 
   const [subject, setSubject] = useState('');
@@ -46,7 +71,9 @@ export default function ProfilePage() {
         setName(user.name);
         setUsername(user.username ?? '');
         setAvatarUrl(user.avatarUrl ?? '');
-        setPhone(user.phone ?? '');
+        const parsed = splitPhone(user.phone);
+        setCountryCode(normalizeCountryCode(parsed.code));
+        setPhoneNumber(parsed.number);
         setBio(user.bio ?? '');
       }
       return;
@@ -54,7 +81,9 @@ export default function ProfilePage() {
     setName(p.name);
     setUsername(p.username ?? '');
     setAvatarUrl(p.avatarUrl ?? '');
-    setPhone(p.phone ?? '');
+    const parsed = splitPhone(p.phone);
+    setCountryCode(normalizeCountryCode(parsed.code));
+    setPhoneNumber(parsed.number);
     setBio(p.bio ?? '');
   }, [profileQuery.data, user]);
 
@@ -106,13 +135,15 @@ export default function ProfilePage() {
       return;
     }
 
+    const combinedPhone = phoneNumber.trim() ? `${countryCode} ${phoneNumber.trim()}` : '';
+
     profileMutation.mutate({
       email: user.email,
       patch: {
         name: name.trim(),
         username: username.trim(),
         avatarUrl: avatarUrl.trim(),
-        phone: phone.trim(),
+        phone: combinedPhone,
         bio: bio.trim(),
       },
     });
@@ -170,7 +201,16 @@ export default function ProfilePage() {
           </label>
           <label>
             Phone
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+1 ..." />
+            <div className="row gap-sm">
+              <select className="input" value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
+                {COUNTRIES.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.name} ({country.code})
+                  </option>
+                ))}
+              </select>
+              <Input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="Phone number" />
+            </div>
           </label>
           <label>
             Bio

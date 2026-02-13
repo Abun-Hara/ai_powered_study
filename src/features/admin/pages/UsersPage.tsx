@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
+import { useSearchParams } from 'react-router-dom';
 import Button from '../../../components/ui/Button';
 import Card from '../../../components/ui/Card';
 import EmptyState from '../../../components/ui/EmptyState';
@@ -19,9 +20,52 @@ import { ManagedUser } from '../types';
 import { UserRole } from '../../../types';
 
 const KEY = ['admin-users'];
+type AdminUsersFilter = 'all' | 'new-registrations' | 'suspended' | 'pending-role-changes';
+
+function resolveFilter(value: string | null): AdminUsersFilter {
+  if (value === 'new-registrations' || value === 'suspended' || value === 'pending-role-changes') {
+    return value;
+  }
+  return 'all';
+}
+
+function getFilterMeta(filter: AdminUsersFilter) {
+  if (filter === 'new-registrations') {
+    return {
+      title: 'New Registrations (7 days)',
+      description: 'Showing users who joined in the last 7 days.',
+      emptyMessage: 'No users registered in the last 7 days.',
+    };
+  }
+
+  if (filter === 'suspended') {
+    return {
+      title: 'Suspended Accounts',
+      description: 'Showing users whose status is suspended.',
+      emptyMessage: 'No suspended accounts found.',
+    };
+  }
+
+  if (filter === 'pending-role-changes') {
+    return {
+      title: 'Pending Role Changes',
+      description: 'Role-change requests are not tracked yet, so this list is currently empty.',
+      emptyMessage: 'No pending role changes found.',
+    };
+  }
+
+  return {
+    title: '',
+    description: '',
+    emptyMessage: 'Try adjusting the search query.',
+  };
+}
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeFilter = resolveFilter(searchParams.get('filter'));
+  const filterMeta = getFilterMeta(activeFilter);
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebouncedValue(query, 300);
   const [selectedProfile, setSelectedProfile] = useState<ManagedUser | null>(null);
@@ -50,10 +94,24 @@ export default function UsersPage() {
 
   const users = usersQuery.data ?? [];
   const filtered = useMemo(() => {
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const q = debouncedQuery.toLowerCase().trim();
-    if (!q) return users;
-    return users.filter((u) => `${u.name} ${u.email} ${u.role} ${u.status}`.toLowerCase().includes(q));
-  }, [users, debouncedQuery]);
+    let scoped = users;
+
+    if (activeFilter === 'new-registrations') {
+      scoped = scoped.filter((u) => {
+        const joinedAtMs = Date.parse(u.joinedAt);
+        return Number.isFinite(joinedAtMs) && joinedAtMs >= sevenDaysAgo;
+      });
+    } else if (activeFilter === 'suspended') {
+      scoped = scoped.filter((u) => u.status === 'suspended');
+    } else if (activeFilter === 'pending-role-changes') {
+      scoped = [];
+    }
+
+    if (!q) return scoped;
+    return scoped.filter((u) => `${u.name} ${u.email} ${u.role} ${u.status}`.toLowerCase().includes(q));
+  }, [users, debouncedQuery, activeFilter]);
 
   const onRoleChange = (target: ManagedUser, role: UserRole) => {
     if (target.email === currentUser?.email) {
@@ -77,6 +135,16 @@ export default function UsersPage() {
     <Card className="stack">
       <h2 className="icon-heading"><i className="fa-solid fa-users-gear" aria-hidden="true" /> User Management</h2>
       <p className="muted">See user profiles, suspend/activate accounts, and change user role.</p>
+      {activeFilter !== 'all' ? (
+        <div className="row gap-sm">
+          <p className="muted">
+            <strong>{filterMeta.title}:</strong> {filterMeta.description}
+          </p>
+          <Button variant="ghost" onClick={() => setSearchParams({})}>
+            Show all users
+          </Button>
+        </div>
+      ) : null}
 
       <Input placeholder="Search users by name, email, role, status" value={query} onChange={(e) => setQuery(e.target.value)} />
 
@@ -90,7 +158,7 @@ export default function UsersPage() {
       {usersQuery.isError ? <ErrorState message="Could not load users." onRetry={() => usersQuery.refetch()} /> : null}
 
       {!usersQuery.isLoading && !usersQuery.isError && filtered.length === 0 ? (
-        <EmptyState title="No users found" message="Try adjusting the search query." />
+        <EmptyState title="No users found" message={filterMeta.emptyMessage} />
       ) : null}
 
       {!usersQuery.isLoading && !usersQuery.isError && filtered.length > 0 ? (

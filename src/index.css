@@ -175,6 +175,39 @@ button {
   box-shadow: var(--shadow);
 }
 
+.interactive-card {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  transition: transform 140ms ease, border-color 140ms ease;
+}
+
+.interactive-card:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+}
+
+.interactive-row {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.7rem;
+  background: var(--surface-soft);
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+
+.interactive-row:hover {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+}
+
+.interactive-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--brand) 55%, #ffffff 45%);
+  outline-offset: 2px;
+}
+
 .btn {
   border-radius: 11px;
   min-height: 40px;

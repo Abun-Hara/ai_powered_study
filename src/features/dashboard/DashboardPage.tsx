@@ -1,6 +1,9 @@
+import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import { fetchPlatformSettings } from '../admin/interactionsApi';
@@ -41,7 +44,21 @@ const recentSummaries = [
 ];
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const settingsQuery = useQuery({ queryKey: ['platform-settings'], queryFn: fetchPlatformSettings });
+  const [pendingDeadlines, setPendingDeadlines] = useState(deadlines);
+
+  const statsWithRoutes = useMemo(() => ([
+    { ...stats[0], to: '/courses' },
+    { ...stats[1], to: '/schedule' },
+    { ...stats[2], to: '/analytics' },
+    { ...stats[3], to: '/ai' },
+  ]), []);
+
+  const onMarkDeadlineDone = (title: string) => {
+    setPendingDeadlines((prev) => prev.filter((item) => item.title !== title));
+    toast.success('Deadline marked as done');
+  };
 
   return (
     <div className="stack-lg">
@@ -58,17 +75,19 @@ export default function DashboardPage() {
       ) : null}
 
       <section className="kpi-grid">
-        {stats.map((item, index) => (
-          <motion.article
+        {statsWithRoutes.map((item, index) => (
+          <motion.button
+            type="button"
             key={item.label}
-            className="card"
+            className="card interactive-card"
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.05 }}
+            onClick={() => navigate(item.to)}
           >
             <p className="muted icon-label"><i className={item.icon} aria-hidden="true" /> {item.label}</p>
             <h3>{item.value}</h3>
-          </motion.article>
+          </motion.button>
         ))}
       </section>
 
@@ -76,23 +95,23 @@ export default function DashboardPage() {
         <Card className="stack">
           <div className="row-between">
             <h3 className="icon-heading"><i className="fa-solid fa-list-check" aria-hidden="true" /> Today's Study Plan</h3>
-            <Button><span className="icon-label"><i className="fa-solid fa-plus" aria-hidden="true" /> Quick Add Task</span></Button>
+            <Button onClick={() => navigate('/schedule')}><span className="icon-label"><i className="fa-solid fa-plus" aria-hidden="true" /> Quick Add Task</span></Button>
           </div>
           {todayPlan.map((item) => (
-            <article key={item.task} className="list-row row-between">
+            <button type="button" key={item.task} className="list-row row-between interactive-row" onClick={() => navigate('/schedule')}>
               <strong>{item.task}</strong>
               <span className="muted">{item.time}</span>
-            </article>
+            </button>
           ))}
         </Card>
 
         <Card className="stack">
           <h3 className="icon-heading"><i className="fa-solid fa-file-lines" aria-hidden="true" /> Recent AI Summaries</h3>
           {recentSummaries.map((item) => (
-            <article key={item.title} className="list-row row-between">
+            <button type="button" key={item.title} className="list-row row-between interactive-row" onClick={() => navigate('/ai')}>
               <span>{item.title}</span>
               <span className="muted">{item.at}</span>
-            </article>
+            </button>
           ))}
         </Card>
       </section>
@@ -114,7 +133,7 @@ export default function DashboardPage() {
 
         <Card className="stack">
           <h3 className="icon-heading"><i className="fa-solid fa-calendar-days" aria-hidden="true" /> Upcoming Deadlines</h3>
-          {deadlines.map((d) => (
+          {pendingDeadlines.map((d) => (
             <article key={d.title} className="list-row stack-sm">
               <div className="row-between">
                 <div>
@@ -127,11 +146,12 @@ export default function DashboardPage() {
                 <span className="progress-fill" style={{ width: `${d.progress}%` }} />
               </div>
               <div className="row gap-sm">
-                <Button variant="secondary"><span className="icon-label"><i className="fa-solid fa-check" aria-hidden="true" /> Mark done</span></Button>
-                <Button variant="ghost"><i className="fa-solid fa-pen" aria-hidden="true" /> Edit</Button>
+                <Button variant="secondary" onClick={() => onMarkDeadlineDone(d.title)}><span className="icon-label"><i className="fa-solid fa-check" aria-hidden="true" /> Mark done</span></Button>
+                <Button variant="ghost" onClick={() => navigate('/courses')}><i className="fa-solid fa-pen" aria-hidden="true" /> Edit</Button>
               </div>
             </article>
           ))}
+          {pendingDeadlines.length === 0 ? <p className="muted">No upcoming deadlines. Nice work.</p> : null}
         </Card>
       </section>
     </div>

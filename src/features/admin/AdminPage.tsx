@@ -1,6 +1,13 @@
 import Card from '../../components/ui/Card';
+import { useNavigate } from 'react-router-dom';
 
 export default function AdminPage() {
+  const navigate = useNavigate();
+
+  const goToUsers = (filter: 'new-registrations' | 'suspended' | 'pending-role-changes') => {
+    navigate(`/admin/users?filter=${filter}`);
+  };
+
   return (
     <div className="stack-lg">
       <Card className="stack">
@@ -18,9 +25,18 @@ export default function AdminPage() {
       <section className="grid-two">
         <Card className="stack">
           <h3 className="icon-heading"><i className="fa-solid fa-user-gear" aria-hidden="true" /> User Operations</h3>
-          <article className="list-row row-between"><strong>New Registrations (7 days)</strong><span>74</span></article>
-          <article className="list-row row-between"><strong>Suspended Accounts</strong><span>24</span></article>
-          <article className="list-row row-between"><strong>Pending Role Changes</strong><span>9</span></article>
+          <button type="button" className="list-row row-between" onClick={() => goToUsers('new-registrations')}>
+            <strong>New Registrations (7 days)</strong>
+            <span>74</span>
+          </button>
+          <button type="button" className="list-row row-between" onClick={() => goToUsers('suspended')}>
+            <strong>Suspended Accounts</strong>
+            <span>24</span>
+          </button>
+          <button type="button" className="list-row row-between" onClick={() => goToUsers('pending-role-changes')}>
+            <strong>Pending Role Changes</strong>
+            <span>9</span>
+          </button>
         </Card>
 
         <Card className="stack">

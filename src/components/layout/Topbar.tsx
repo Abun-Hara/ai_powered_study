@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import ThemeToggle from '../shared/ThemeToggle';
 import Button from '../ui/Button';
@@ -13,7 +14,9 @@ interface TopbarProps {
 
 export default function Topbar({ collapsed, onToggleCollapsed, onToggleMobile }: TopbarProps) {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   const [openMenu, setOpenMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const ticketsQuery = useQuery({
     queryKey: user?.role === 'admin' ? ['admin-support-tickets'] : ['my-support-tickets', user?.email],
     queryFn: () => (user?.role === 'admin' ? fetchSupportTickets() : fetchUserTickets(user?.email ?? '')),
@@ -24,6 +27,31 @@ export default function Topbar({ collapsed, onToggleCollapsed, onToggleMobile }:
     (user?.role === 'admin'
       ? (ticketsQuery.data ?? []).filter((t) => t.status !== 'resolved').length
       : (ticketsQuery.data ?? []).filter((t) => t.status !== 'resolved').length + (settingsQuery.data?.announcement ? 1 : 0));
+
+  useEffect(() => {
+    if (!openMenu) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuRef.current) return;
+      const target = event.target as Node;
+      if (!menuRef.current.contains(target)) {
+        setOpenMenu(false);
+      }
+    };
+
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpenMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onEscape);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onEscape);
+    };
+  }, [openMenu]);
 
   return (
     <header className="topbar-modern">
@@ -43,7 +71,7 @@ export default function Topbar({ collapsed, onToggleCollapsed, onToggleMobile }:
       </div>
 
       <div className="row gap-sm">
-        <Button variant="ghost" aria-label="Notifications">
+        <Button variant="ghost" aria-label="Notifications" onClick={() => navigate(user?.role === 'admin' ? '/admin/reports' : '/profile')}>
           <span className="icon-label">
             <i className="fa-solid fa-bell" aria-hidden="true" />
             Notifications ({notificationCount})
@@ -51,7 +79,7 @@ export default function Topbar({ collapsed, onToggleCollapsed, onToggleMobile }:
         </Button>
         <ThemeToggle />
 
-        <div className="avatar-wrap">
+        <div className="avatar-wrap" ref={menuRef}>
           <button className="avatar-btn" onClick={() => setOpenMenu((p) => !p)}>
             {user?.avatarUrl ? (
               <img src={user.avatarUrl} alt={user.name || 'User'} className="avatar-img" />
