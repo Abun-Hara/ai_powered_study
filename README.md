@@ -1,10 +1,18 @@
-﻿# AI-Powered Study Planner Frontend
+# AI-Powered Study Planner
 
-Modern React + Vite + TypeScript frontend using feature-based architecture.
+Modern React + Vite + TypeScript frontend with Supabase backend architecture.
 
 ## Architecture
 
 ```text
+frontend/
+  src/
+backend/
+  supabase/
+    functions/
+supabase/
+  schema.sql
+
 src/
   app/
   components/
@@ -47,14 +55,24 @@ npm run dev
 npm run build
 ```
 
+## Supabase Backend Setup
+
+1. Copy `.env.example` to `.env` and fill:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+2. In Supabase SQL editor, run `supabase/schema.sql`.
+3. Create users from the UI, then set admin users by updating `users.role = 'admin'` in Supabase.
+4. Restart the dev server after changing env vars.
+
 ## Demo Login
 
-- Student: `student@example.com`
-- Admin: `admin@example.com`
-- Any password works in frontend mock mode.
+- Register a real user from the app (Supabase Auth).
+- Password must match the one used at sign-up.
+- Admin access is controlled by `users.role = 'admin'`.
 
 ## Backend Integration Points
 
-- Auth: `src/context/AuthContext.tsx`
-- AI summarization endpoint call: `src/services/aiService.ts`
-- Route system: `src/routes/AppRouter.tsx`
+- Supabase client: `src/lib/supabase.ts`
+- Auth state and session sync: `src/store/authStore.ts`
+- Courses CRUD (database): `src/features/courses/api.ts`
+- Full backend docs: `backend/ARCHITECTURE.md`

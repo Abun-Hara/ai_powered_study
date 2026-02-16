@@ -369,6 +369,24 @@ button {
   padding: 0.7rem;
 }
 
+button.list-row {
+  width: 100%;
+  text-align: left;
+  color: var(--text);
+  background: var(--surface-soft);
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+
+button.list-row:hover {
+  border-color: color-mix(in srgb, var(--brand) 45%, var(--border));
+  background: color-mix(in srgb, var(--surface-soft) 75%, var(--surface) 25%);
+}
+
+button.list-row:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--brand) 55%, #ffffff 45%);
+  outline-offset: 2px;
+}
+
 .pill {
   border-radius: 999px;
   padding: 0.2rem 0.45rem;

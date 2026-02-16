@@ -1,55 +1,92 @@
 import { CourseItem } from './types/course';
+import { supabase } from '../../lib/supabase';
 
-const STORAGE_KEY = 'study_planner_courses_v2';
-
-const seedCourses: CourseItem[] = [
-  { id: '1', title: 'Data Structures', code: 'CS201', instructor: 'Dr. Kim', color: '#2e87f2', deadline: '2026-02-14' },
-  { id: '2', title: 'Database Systems', code: 'CS305', instructor: 'Prof. Lewis', color: '#13a389', deadline: '2026-02-18' },
-  { id: '3', title: 'Linear Algebra', code: 'MTH210', instructor: 'Dr. Flores', color: '#f6a12f', deadline: '2026-02-20' },
-  { id: '4', title: 'Operating Systems', code: 'CS330', instructor: 'Dr. Patel', color: '#c762d9', deadline: '2026-02-26' },
-  { id: '5', title: 'AI Fundamentals', code: 'CS410', instructor: 'Prof. Reed', color: '#ff6b6b', deadline: '2026-03-01' },
-];
-
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+interface CourseRow {
+  id: string;
+  title: string;
+  code: string;
+  instructor: string;
+  color: string;
+  deadline: string | null;
 }
 
-function readCourses() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seedCourses));
-    return seedCourses;
+async function requireUserId() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) {
+    throw error ?? new Error('Not authenticated');
+  }
+  return data.user.id;
+}
+
+function toCourseItem(row: CourseRow): CourseItem {
+  return {
+    id: row.id,
+    title: row.title,
+    code: row.code,
+    instructor: row.instructor,
+    color: row.color,
+    deadline: row.deadline ?? '',
+  };
+}
+
+export async function fetchCourses(): Promise<CourseItem[]> {
+  const userId = await requireUserId();
+
+  const { data, error } = await supabase
+    .from('courses')
+    .select('id, title, code, instructor, color, deadline')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw error;
   }
 
-  return JSON.parse(raw) as CourseItem[];
+  return ((data ?? []) as CourseRow[]).map((row: CourseRow) => toCourseItem(row));
 }
 
-function writeCourses(courses: CourseItem[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(courses));
+export async function upsertCourse(course: CourseItem): Promise<CourseItem[]> {
+  const userId = await requireUserId();
+
+  if (course.id) {
+    const { error } = await supabase
+      .from('courses')
+      .update({
+        title: course.title,
+        code: course.code,
+        instructor: course.instructor,
+        color: course.color,
+        deadline: course.deadline || null,
+      })
+      .eq('id', course.id)
+      .eq('user_id', userId);
+
+    if (error) {
+      throw error;
+    }
+  } else {
+    const { error } = await supabase.from('courses').insert({
+      user_id: userId,
+      title: course.title,
+      code: course.code,
+      instructor: course.instructor,
+      color: course.color,
+      deadline: course.deadline || null,
+    });
+
+    if (error) {
+      throw error;
+    }
+  }
+
+  return fetchCourses();
 }
 
-export async function fetchCourses() {
-  await wait(250);
-  return readCourses();
-}
-
-export async function upsertCourse(course: CourseItem) {
-  await wait(300);
-  const current = readCourses();
-  const exists = current.some((item) => item.id === course.id && item.id !== '');
-
-  const next = exists
-    ? current.map((item) => (item.id === course.id ? course : item))
-    : [{ ...course, id: crypto.randomUUID() }, ...current];
-
-  writeCourses(next);
-  return next;
-}
-
-export async function removeCourse(courseId: string) {
-  await wait(220);
-  const current = readCourses();
-  const next = current.filter((item) => item.id !== courseId);
-  writeCourses(next);
-  return next;
+export async function removeCourse(courseId: string): Promise<CourseItem[]> {
+  const userId = await requireUserId();
+  const { error } = await supabase.from('courses').delete().eq('id', courseId).eq('user_id', userId);
+  if (error) {
+    throw error;
+  }
+  return fetchCourses();
 }

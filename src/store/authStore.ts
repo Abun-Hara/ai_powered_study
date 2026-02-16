@@ -1,135 +1,215 @@
+import { Session, User as SupabaseAuthUser } from '@supabase/supabase-js';
 import { create } from 'zustand';
 import { User, UserRole } from '../types';
-import { ensureManagedUser, findManagedUserByEmail } from '../features/admin/api';
+import { supabase } from '../lib/supabase';
 
-type PersistMode = 'local' | 'session';
+interface UserRow {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  username: string | null;
+  avatar_url: string | null;
+  phone: string | null;
+  bio: string | null;
+}
 
 interface AuthState {
   user: User | null;
   accessToken: string | null;
   refreshToken: string | null;
-  persistMode: PersistMode;
   isAuthenticated: boolean;
-  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
+  isInitializing: boolean;
+  initialize: () => Promise<void>;
+  syncSession: (session: Session | null) => Promise<void>;
+  login: (email: string, password: string, _rememberMe?: boolean) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
-  updateProfile: (patch: Pick<User, 'name' | 'username' | 'avatarUrl' | 'phone' | 'bio'>) => void;
-  logout: () => void;
-  setSession: (session: {
-    user: User;
-    accessToken: string;
-    refreshToken: string;
-    rememberMe?: boolean;
-  }) => void;
+  updateProfile: (patch: Pick<User, 'name' | 'username' | 'avatarUrl' | 'phone' | 'bio'>) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
-const AUTH_STORAGE_KEY = 'study_planner_auth_state_v2';
-
-interface PersistedAuth {
-  user: User;
-  accessToken: string;
-  refreshToken: string;
+function normalizeRole(role: string | null | undefined): UserRole {
+  return role === 'admin' ? 'admin' : 'student';
 }
 
-function readPersistedAuth(): { mode: PersistMode; auth: PersistedAuth } | null {
-  const local = localStorage.getItem(AUTH_STORAGE_KEY);
-  if (local) {
-    return { mode: 'local', auth: JSON.parse(local) as PersistedAuth };
+function toAppUser(authUser: SupabaseAuthUser, profile: UserRow): User {
+  return {
+    id: authUser.id,
+    email: authUser.email ?? profile.email,
+    name: profile.name,
+    role: normalizeRole(profile.role),
+    username: profile.username ?? undefined,
+    avatarUrl: profile.avatar_url ?? undefined,
+    phone: profile.phone ?? undefined,
+    bio: profile.bio ?? undefined,
+  };
+}
+
+async function ensureProfile(authUser: SupabaseAuthUser): Promise<UserRow> {
+  const { data: profile, error } = await supabase
+    .from('users')
+    .select('id, email, name, role, username, avatar_url, phone, bio')
+    .eq('id', authUser.id)
+    .maybeSingle<UserRow>();
+
+  if (error) {
+    throw error;
   }
 
-  const session = sessionStorage.getItem(AUTH_STORAGE_KEY);
-  if (session) {
-    return { mode: 'session', auth: JSON.parse(session) as PersistedAuth };
+  if (profile) {
+    return profile;
   }
 
-  return null;
-}
+  const fallbackName =
+    (authUser.user_metadata?.name as string | undefined) ??
+    (authUser.user_metadata?.full_name as string | undefined) ??
+    authUser.email?.split('@')[0] ??
+    'Student';
 
-function persistAuth(mode: PersistMode, payload: PersistedAuth) {
-  if (mode === 'local') {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
-    sessionStorage.removeItem(AUTH_STORAGE_KEY);
-    return;
+  const fallbackRole = normalizeRole(authUser.user_metadata?.role as string | undefined);
+
+  const { data: inserted, error: insertError } = await supabase
+    .from('users')
+    .insert({
+      id: authUser.id,
+      email: authUser.email ?? '',
+      name: fallbackName,
+      role: fallbackRole === 'admin' ? 'admin' : 'user',
+    })
+    .select('id, email, name, role, username, avatar_url, phone, bio')
+    .single<UserRow>();
+
+  if (insertError || !inserted) {
+    throw insertError ?? new Error('Failed to create profile');
   }
 
-  sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload));
-  localStorage.removeItem(AUTH_STORAGE_KEY);
+  return inserted;
 }
 
-function clearPersistedAuth() {
-  localStorage.removeItem(AUTH_STORAGE_KEY);
-  sessionStorage.removeItem(AUTH_STORAGE_KEY);
+function applySessionState(set: (partial: Partial<AuthState>) => void, user: User, session: Session) {
+  set({
+    user,
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    isAuthenticated: true,
+    isInitializing: false,
+  });
 }
 
-const initial = readPersistedAuth();
+function clearSessionState(set: (partial: Partial<AuthState>) => void) {
+  set({
+    user: null,
+    accessToken: null,
+    refreshToken: null,
+    isAuthenticated: false,
+    isInitializing: false,
+  });
+}
 
 export const useAuthStore = create<AuthState>((set, get) => ({
-  user: initial?.auth.user ?? null,
-  accessToken: initial?.auth.accessToken ?? null,
-  refreshToken: initial?.auth.refreshToken ?? null,
-  persistMode: initial?.mode ?? 'local',
-  isAuthenticated: Boolean(initial?.auth.user && initial?.auth.accessToken),
+  user: null,
+  accessToken: null,
+  refreshToken: null,
+  isAuthenticated: false,
+  isInitializing: true,
 
-  setSession: ({ user, accessToken, refreshToken, rememberMe = true }) => {
-    const mode: PersistMode = rememberMe ? 'local' : 'session';
-    persistAuth(mode, { user, accessToken, refreshToken });
-    set({ user, accessToken, refreshToken, persistMode: mode, isAuthenticated: true });
-  },
-
-  login: async (email: string, _password: string, rememberMe = true) => {
-    const managed = findManagedUserByEmail(email);
-    if (managed?.status === 'suspended') {
-      throw new Error('Account is suspended');
+  initialize: async () => {
+    set({ isInitializing: true });
+    const { data, error } = await supabase.auth.getSession();
+    if (error || !data.session) {
+      clearSessionState(set);
+      return;
     }
 
-    const role: UserRole = managed?.role ?? (email.includes('admin') ? 'admin' : 'student');
-    const user: User = {
-      id: managed?.id ?? crypto.randomUUID(),
-      name: managed?.name ?? (role === 'admin' ? 'Admin User' : 'Student User'),
-      email,
-      role,
-      username: managed?.username,
-      avatarUrl: managed?.avatarUrl,
-      phone: managed?.phone,
-      bio: managed?.bio,
-    };
-
-    const accessToken = `access_demo_${Date.now()}`;
-    const refreshToken = `refresh_demo_${Date.now()}`;
-
-    get().setSession({ user, accessToken, refreshToken, rememberMe });
-    ensureManagedUser(user);
+    await get().syncSession(data.session);
   },
 
-  register: async (name: string, email: string, _password: string) => {
-    const user: User = {
-      id: crypto.randomUUID(),
-      name,
-      email,
-      role: 'student',
-    };
+  syncSession: async (session) => {
+    if (!session) {
+      clearSessionState(set);
+      return;
+    }
 
-    const accessToken = `access_demo_${Date.now()}`;
-    const refreshToken = `refresh_demo_${Date.now()}`;
-
-    get().setSession({ user, accessToken, refreshToken, rememberMe: true });
-    ensureManagedUser(user);
+    try {
+      const profile = await ensureProfile(session.user);
+      const user = toAppUser(session.user, profile);
+      applySessionState(set, user, session);
+    } catch {
+      clearSessionState(set);
+    }
   },
 
-  updateProfile: (patch) => {
-    const state = get();
-    if (!state.user) return;
+  login: async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error || !data.session) {
+      throw error ?? new Error('Login failed');
+    }
 
-    const nextUser: User = { ...state.user, ...patch };
-    persistAuth(state.persistMode, {
-      user: nextUser,
-      accessToken: state.accessToken ?? '',
-      refreshToken: state.refreshToken ?? '',
+    await get().syncSession(data.session);
+  },
+
+  register: async (name, email, password) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          name,
+        },
+      },
     });
-    set({ user: nextUser });
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data.session) {
+      throw new Error('Account created. Confirm your email, then log in.');
+    }
+
+    await get().syncSession(data.session);
   },
 
-  logout: () => {
-    clearPersistedAuth();
-    set({ user: null, accessToken: null, refreshToken: null, isAuthenticated: false });
+  updateProfile: async (patch) => {
+    const current = get().user;
+    if (!current) {
+      throw new Error('Not authenticated');
+    }
+
+    const { data, error } = await supabase
+      .from('users')
+      .upsert({
+        id: current.id,
+        email: current.email,
+        name: patch.name,
+        username: patch.username ?? null,
+        avatar_url: patch.avatarUrl ?? null,
+        phone: patch.phone ?? null,
+        bio: patch.bio ?? null,
+      }, { onConflict: 'id' })
+      .select('id, email, name, role, username, avatar_url, phone, bio')
+      .single<UserRow>();
+
+    if (error || !data) {
+      throw error ?? new Error('Failed to update profile');
+    }
+
+    set({
+      user: {
+        id: current.id,
+        email: current.email,
+        name: data.name,
+        role: normalizeRole(data.role),
+        username: data.username ?? undefined,
+        avatarUrl: data.avatar_url ?? undefined,
+        phone: data.phone ?? undefined,
+        bio: data.bio ?? undefined,
+      },
+    });
+  },
+
+  logout: async () => {
+    await supabase.auth.signOut();
+    clearSessionState(set);
   },
 }));

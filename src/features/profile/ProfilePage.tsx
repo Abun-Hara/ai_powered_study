@@ -11,13 +11,8 @@ import {
   createSupportTicket,
   fetchUserTickets,
 } from '../admin/interactionsApi';
-import {
-  fetchManagedUserByEmail,
-  updateManagedUserProfile,
-} from '../admin/api';
 
 const MY_TICKETS_KEY = ['my-support-tickets'];
-const MY_PROFILE_KEY = ['my-profile'];
 const COUNTRIES = [
   { name: 'United States', code: '+1' },
   { name: 'Ethiopia', code: '+251' },
@@ -58,56 +53,27 @@ export default function ProfilePage() {
   const [message, setMessage] = useState('');
   const [isContactOpen, setIsContactOpen] = useState(false);
 
-  const profileQuery = useQuery({
-    queryKey: [...MY_PROFILE_KEY, user?.email],
-    queryFn: () => fetchManagedUserByEmail(user?.email ?? ''),
-    enabled: Boolean(user?.email),
-  });
-
   useEffect(() => {
-    const p = profileQuery.data;
-    if (!p) {
-      if (user) {
-        setName(user.name);
-        setUsername(user.username ?? '');
-        setAvatarUrl(user.avatarUrl ?? '');
-        const parsed = splitPhone(user.phone);
-        setCountryCode(normalizeCountryCode(parsed.code));
-        setPhoneNumber(parsed.number);
-        setBio(user.bio ?? '');
-      }
-      return;
-    }
-    setName(p.name);
-    setUsername(p.username ?? '');
-    setAvatarUrl(p.avatarUrl ?? '');
-    const parsed = splitPhone(p.phone);
+    if (!user) return;
+
+    setName(user.name);
+    setUsername(user.username ?? '');
+    setAvatarUrl(user.avatarUrl ?? '');
+    const parsed = splitPhone(user.phone);
     setCountryCode(normalizeCountryCode(parsed.code));
     setPhoneNumber(parsed.number);
-    setBio(p.bio ?? '');
-  }, [profileQuery.data, user]);
+    setBio(user.bio ?? '');
+  }, [user]);
 
   const profileMutation = useMutation({
-    mutationFn: updateManagedUserProfile,
-    onSuccess: (next) => {
-      if (!next) {
-        toast.error('Profile update failed');
-        return;
-      }
-
-      updateProfile({
-        name: next.name,
-        username: next.username,
-        avatarUrl: next.avatarUrl,
-        phone: next.phone,
-        bio: next.bio,
-      });
-
-      queryClient.setQueryData([...MY_PROFILE_KEY, user?.email], next);
-      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-      toast.success('Profile updated');
+    mutationFn: updateProfile,
+    onSuccess: () => {
+      toast.success('Profile updated in database');
     },
-    onError: () => toast.error('Profile update failed'),
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'Profile update failed';
+      toast.error(message);
+    },
   });
 
   const ticketsQuery = useQuery({
@@ -138,14 +104,11 @@ export default function ProfilePage() {
     const combinedPhone = phoneNumber.trim() ? `${countryCode} ${phoneNumber.trim()}` : '';
 
     profileMutation.mutate({
-      email: user.email,
-      patch: {
-        name: name.trim(),
-        username: username.trim(),
-        avatarUrl: avatarUrl.trim(),
-        phone: combinedPhone,
-        bio: bio.trim(),
-      },
+      name: name.trim(),
+      username: username.trim(),
+      avatarUrl: avatarUrl.trim(),
+      phone: combinedPhone,
+      bio: bio.trim(),
     });
   };
 
@@ -185,7 +148,7 @@ export default function ProfilePage() {
 
       <Card className="stack">
         <h3 className="icon-heading"><i className="fa-solid fa-user-pen" aria-hidden="true" /> Edit Profile</h3>
-        {profileQuery.isLoading ? <Skeleton className="h-20" /> : null}
+        {!user ? <Skeleton className="h-20" /> : null}
         <form className="stack" onSubmit={onProfileSubmit}>
           <label>
             Full Name

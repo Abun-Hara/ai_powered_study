@@ -27,9 +27,10 @@ export default function LoginPage() {
     try {
       await login(values.email, values.password, Boolean(values.rememberMe));
       toast.success('Signed in successfully');
-      navigate(values.email.includes('admin') ? '/admin' : '/dashboard');
-    } catch {
-      toast.error('Login failed, please try again');
+      navigate('/');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Login failed, please try again';
+      toast.error(message);
     }
   };
 

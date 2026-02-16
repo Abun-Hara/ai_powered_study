@@ -34,8 +34,12 @@ function RouteFallback() {
 }
 
 export default function AppRouter() {
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, isInitializing } = useAuth();
   const home = user?.role === 'admin' ? '/admin' : '/dashboard';
+
+  if (isInitializing) {
+    return <RouteFallback />;
+  }
 
   return (
     <Suspense fallback={<RouteFallback />}>
