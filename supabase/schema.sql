@@ -57,10 +57,22 @@ create table if not exists public.courses (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users (id) on delete cascade,
   title text not null,
+  code text not null default '',
+  instructor text not null default '',
   color text not null default '#2e87f2',
+  deadline date,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.courses
+  add column if not exists code text not null default '';
+
+alter table public.courses
+  add column if not exists instructor text not null default '';
+
+alter table public.courses
+  add column if not exists deadline date;
 
 create table if not exists public.tasks (
   id uuid primary key default gen_random_uuid(),
@@ -113,6 +125,53 @@ create table if not exists public.uploaded_files (
   unique (bucket_id, storage_path)
 );
 
+-- Global platform settings and announcements (single row: id=1)
+create table if not exists public.platform_settings (
+  id integer primary key check (id = 1),
+  maintenance_mode boolean not null default false,
+  announcement text not null default '',
+  default_theme text not null default 'system' check (default_theme in ('light', 'dark', 'system')),
+  updated_by uuid references public.users (id) on delete set null,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+insert into public.platform_settings (id, maintenance_mode, announcement, default_theme)
+values (1, false, 'Welcome to the AI-Powered Study Planner. Stay consistent this week.', 'system')
+on conflict (id) do nothing;
+
+-- Chat threads between admins and students
+create table if not exists public.support_threads (
+  id uuid primary key default gen_random_uuid(),
+  student_id uuid not null references public.users (id) on delete cascade,
+  subject text not null,
+  status text not null default 'open' check (status in ('open', 'in_progress', 'resolved')),
+  deleted_by_admin boolean not null default false,
+  deleted_by_student boolean not null default false,
+  last_read_by_admin_at timestamptz,
+  last_read_by_student_at timestamptz,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.support_messages (
+  id uuid primary key default gen_random_uuid(),
+  thread_id uuid not null references public.support_threads (id) on delete cascade,
+  sender_id uuid not null references public.users (id) on delete cascade,
+  sender_role text not null check (sender_role in ('admin', 'student')),
+  sender_name text not null,
+  message text not null,
+  deleted_by_admin boolean not null default false,
+  deleted_by_student boolean not null default false,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.support_messages
+  add column if not exists deleted_by_admin boolean not null default false;
+
+alter table public.support_messages
+  add column if not exists deleted_by_student boolean not null default false;
+
 -- =========================
 -- Indexing
 -- =========================
@@ -126,6 +185,10 @@ create index if not exists idx_study_logs_user_date on public.study_logs (user_i
 create index if not exists idx_ai_usage_user_created on public.ai_usage (user_id, created_at desc);
 create index if not exists idx_ai_summaries_user_created on public.ai_summaries (user_id, created_at desc);
 create index if not exists idx_uploaded_files_user_created on public.uploaded_files (user_id, created_at desc);
+create index if not exists idx_support_threads_student_updated on public.support_threads (student_id, updated_at desc);
+create index if not exists idx_support_threads_updated on public.support_threads (updated_at desc);
+create index if not exists idx_support_messages_thread_created on public.support_messages (thread_id, created_at asc);
+create index if not exists idx_platform_settings_updated on public.platform_settings (updated_at desc);
 
 -- =========================
 -- Triggers
@@ -149,6 +212,16 @@ for each row execute function public.handle_updated_at();
 drop trigger if exists trg_study_logs_updated_at on public.study_logs;
 create trigger trg_study_logs_updated_at
 before update on public.study_logs
+for each row execute function public.handle_updated_at();
+
+drop trigger if exists trg_support_threads_updated_at on public.support_threads;
+create trigger trg_support_threads_updated_at
+before update on public.support_threads
+for each row execute function public.handle_updated_at();
+
+drop trigger if exists trg_platform_settings_updated_at on public.platform_settings;
+create trigger trg_platform_settings_updated_at
+before update on public.platform_settings
 for each row execute function public.handle_updated_at();
 
 -- Keep task completion timestamp consistent.
@@ -380,6 +453,9 @@ alter table public.study_logs enable row level security;
 alter table public.ai_usage enable row level security;
 alter table public.ai_summaries enable row level security;
 alter table public.uploaded_files enable row level security;
+alter table public.platform_settings enable row level security;
+alter table public.support_threads enable row level security;
+alter table public.support_messages enable row level security;
 
 -- users table
 drop policy if exists "users_select_own_or_admin" on public.users;
@@ -552,6 +628,113 @@ on public.uploaded_files
 for delete
 to authenticated
 using (user_id = auth.uid() or public.is_admin(auth.uid()));
+
+-- platform_settings table
+drop policy if exists "platform_settings_select_all_authenticated" on public.platform_settings;
+create policy "platform_settings_select_all_authenticated"
+on public.platform_settings
+for select
+to authenticated
+using (true);
+
+drop policy if exists "platform_settings_insert_admin_only" on public.platform_settings;
+create policy "platform_settings_insert_admin_only"
+on public.platform_settings
+for insert
+to authenticated
+with check (public.is_admin(auth.uid()));
+
+drop policy if exists "platform_settings_update_admin_only" on public.platform_settings;
+create policy "platform_settings_update_admin_only"
+on public.platform_settings
+for update
+to authenticated
+using (public.is_admin(auth.uid()))
+with check (public.is_admin(auth.uid()));
+
+-- support_threads table
+drop policy if exists "support_threads_select_student_or_admin" on public.support_threads;
+create policy "support_threads_select_student_or_admin"
+on public.support_threads
+for select
+to authenticated
+using (student_id = auth.uid() or public.is_admin(auth.uid()));
+
+drop policy if exists "support_threads_insert_student_or_admin" on public.support_threads;
+create policy "support_threads_insert_student_or_admin"
+on public.support_threads
+for insert
+to authenticated
+with check (student_id = auth.uid() or public.is_admin(auth.uid()));
+
+drop policy if exists "support_threads_update_student_or_admin" on public.support_threads;
+create policy "support_threads_update_student_or_admin"
+on public.support_threads
+for update
+to authenticated
+using (student_id = auth.uid() or public.is_admin(auth.uid()))
+with check (student_id = auth.uid() or public.is_admin(auth.uid()));
+
+drop policy if exists "support_threads_delete_student_or_admin" on public.support_threads;
+create policy "support_threads_delete_student_or_admin"
+on public.support_threads
+for delete
+to authenticated
+using (student_id = auth.uid() or public.is_admin(auth.uid()));
+
+-- support_messages table
+drop policy if exists "support_messages_select_thread_member" on public.support_messages;
+create policy "support_messages_select_thread_member"
+on public.support_messages
+for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.support_threads st
+    where st.id = support_messages.thread_id
+      and (st.student_id = auth.uid() or public.is_admin(auth.uid()))
+  )
+);
+
+drop policy if exists "support_messages_insert_thread_member" on public.support_messages;
+create policy "support_messages_insert_thread_member"
+on public.support_messages
+for insert
+to authenticated
+with check (
+  sender_id = auth.uid()
+  and exists (
+    select 1
+    from public.support_threads st
+    where st.id = support_messages.thread_id
+      and (st.student_id = auth.uid() or public.is_admin(auth.uid()))
+  )
+);
+
+drop policy if exists "support_messages_update_thread_member" on public.support_messages;
+create policy "support_messages_update_thread_member"
+on public.support_messages
+for update
+to authenticated
+using (
+  sender_id = auth.uid()
+  or public.is_admin(auth.uid())
+)
+with check (
+  sender_id = auth.uid()
+  or public.is_admin(auth.uid())
+);
+
+drop policy if exists "support_messages_delete_own_or_admin" on public.support_messages;
+create policy "support_messages_delete_own_or_admin"
+on public.support_messages
+for delete
+to authenticated
+using (
+  sender_id = auth.uid()
+  or public.is_admin(auth.uid())
+);
 
 -- =========================
 -- Storage bucket + policies

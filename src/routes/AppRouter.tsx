@@ -17,6 +17,7 @@ const AnalyticsPage = lazy(() => import('../features/analytics/AnalyticsPage'));
 const CoursesPage = lazy(() => import('../features/courses/CoursesPage'));
 const DashboardPage = lazy(() => import('../features/dashboard/DashboardPage'));
 const AINotesPage = lazy(() => import('../features/ai/AINotesPage'));
+const NotificationsPage = lazy(() => import('../features/notifications/NotificationsPage'));
 const ProfilePage = lazy(() => import('../features/profile/ProfilePage'));
 const LoginPage = lazy(() => import('../features/auth/pages/LoginPage'));
 const RegisterPage = lazy(() => import('../features/auth/pages/RegisterPage'));
@@ -61,6 +62,7 @@ export default function AppRouter() {
           <Route path="schedule" element={<SchedulePage />} />
           <Route path="ai" element={<AINotesPage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
 

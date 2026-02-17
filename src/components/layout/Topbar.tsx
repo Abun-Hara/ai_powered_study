@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabase';
 import ThemeToggle from '../shared/ThemeToggle';
 import Button from '../ui/Button';
 import { fetchPlatformSettings, fetchSupportTickets, fetchUserTickets } from '../../features/admin/interactionsApi';
@@ -14,6 +15,7 @@ interface TopbarProps {
 
 export default function Topbar({ collapsed, onToggleCollapsed, onToggleMobile }: TopbarProps) {
   const { user, logout } = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [openMenu, setOpenMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -21,12 +23,14 @@ export default function Topbar({ collapsed, onToggleCollapsed, onToggleMobile }:
     queryKey: user?.role === 'admin' ? ['admin-support-tickets'] : ['my-support-tickets', user?.email],
     queryFn: () => (user?.role === 'admin' ? fetchSupportTickets() : fetchUserTickets(user?.email ?? '')),
     enabled: Boolean(user?.email),
+    refetchInterval: 4000,
+    refetchOnWindowFocus: true,
   });
   const settingsQuery = useQuery({ queryKey: ['platform-settings'], queryFn: fetchPlatformSettings });
   const notificationCount =
     (user?.role === 'admin'
-      ? (ticketsQuery.data ?? []).filter((t) => t.status !== 'resolved').length
-      : (ticketsQuery.data ?? []).filter((t) => t.status !== 'resolved').length + (settingsQuery.data?.announcement ? 1 : 0));
+      ? (ticketsQuery.data ?? []).filter((t) => t.unreadByAdmin).length
+      : (ticketsQuery.data ?? []).filter((t) => t.unreadByUser).length + (settingsQuery.data?.announcement ? 1 : 0));
 
   useEffect(() => {
     if (!openMenu) return;
@@ -53,6 +57,28 @@ export default function Topbar({ collapsed, onToggleCollapsed, onToggleMobile }:
     };
   }, [openMenu]);
 
+  useEffect(() => {
+    if (!user?.email) return;
+
+    const ticketKey = user.role === 'admin' ? ['admin-support-tickets'] : ['my-support-tickets', user.email];
+    const channel = supabase
+      .channel(`topbar-realtime-${user.email}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_threads' }, () => {
+        queryClient.invalidateQueries({ queryKey: ticketKey });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_messages' }, () => {
+        queryClient.invalidateQueries({ queryKey: ticketKey });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'platform_settings' }, () => {
+        queryClient.invalidateQueries({ queryKey: ['platform-settings'] });
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient, user?.email, user?.role]);
+
   return (
     <header className="topbar-modern">
       <div className="row gap-sm">
@@ -71,7 +97,7 @@ export default function Topbar({ collapsed, onToggleCollapsed, onToggleMobile }:
       </div>
 
       <div className="row gap-sm">
-        <Button variant="ghost" aria-label="Notifications" onClick={() => navigate(user?.role === 'admin' ? '/admin/reports' : '/profile')}>
+        <Button variant="ghost" aria-label="Notifications" onClick={() => navigate(user?.role === 'admin' ? '/admin/reports' : '/notifications')}>
           <span className="icon-label">
             <i className="fa-solid fa-bell" aria-hidden="true" />
             Notifications ({notificationCount})

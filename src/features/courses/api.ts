@@ -4,8 +4,8 @@ import { supabase } from '../../lib/supabase';
 interface CourseRow {
   id: string;
   title: string;
-  code: string;
-  instructor: string;
+  code: string | null;
+  instructor: string | null;
   color: string;
   deadline: string | null;
 }
@@ -22,8 +22,8 @@ function toCourseItem(row: CourseRow): CourseItem {
   return {
     id: row.id,
     title: row.title,
-    code: row.code,
-    instructor: row.instructor,
+    code: row.code ?? '',
+    instructor: row.instructor ?? '',
     color: row.color,
     deadline: row.deadline ?? '',
   };

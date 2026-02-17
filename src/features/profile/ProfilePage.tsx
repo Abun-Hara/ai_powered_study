@@ -7,9 +7,15 @@ import Input from '../../components/ui/Input';
 import Modal from '../../components/ui/Modal';
 import Skeleton from '../../components/ui/Skeleton';
 import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabase';
 import {
   createSupportTicket,
+  deleteSupportMessage,
+  deleteSupportTicket,
   fetchUserTickets,
+  markSupportTicketsSeen,
+  sendTicketMessage,
+  SupportTicket,
 } from '../admin/interactionsApi';
 
 const MY_TICKETS_KEY = ['my-support-tickets'];
@@ -38,6 +44,34 @@ function normalizeCountryCode(code: string) {
   return COUNTRIES.some((country) => country.code === code) ? code : '+1';
 }
 
+function withOptimisticMessage(tickets: SupportTicket[], threadId: string, senderName: string, message: string) {
+  return tickets.map((t) => {
+    if (t.id !== threadId) return t;
+    const now = new Date().toISOString().slice(0, 10);
+    return {
+      ...t,
+      status: 'open',
+      updatedAt: now,
+      messages: [
+        ...t.messages,
+        {
+          id: `tmp-${crypto.randomUUID()}`,
+          sender: 'user' as const,
+          senderName,
+          message,
+          createdAt: now,
+        },
+      ],
+    };
+  });
+}
+
+function withoutMessage(tickets: SupportTicket[], threadId: string, messageId: string) {
+  return tickets.map((t) =>
+    t.id === threadId ? { ...t, messages: t.messages.filter((m) => m.id !== messageId) } : t
+  );
+}
+
 export default function ProfilePage() {
   const { user, updateProfile } = useAuth();
   const queryClient = useQueryClient();
@@ -52,6 +86,7 @@ export default function ProfilePage() {
   const [subject, setSubject] = useState('');
   const [message, setMessage] = useState('');
   const [isContactOpen, setIsContactOpen] = useState(false);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!user) return;
@@ -65,14 +100,41 @@ export default function ProfilePage() {
     setBio(user.bio ?? '');
   }, [user]);
 
+  useEffect(() => {
+    if (!user?.email) return;
+
+    void markSupportTicketsSeen({ viewer: 'user', email: user.email }).then(() => {
+      queryClient.invalidateQueries({ queryKey: [...MY_TICKETS_KEY, user.email] });
+      queryClient.invalidateQueries({ queryKey: ['admin-support-tickets'] });
+    });
+  }, [queryClient, user?.email]);
+
+  useEffect(() => {
+    if (!user?.email) return;
+
+    const channel = supabase
+      .channel(`profile-support-realtime-${user.email}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_threads' }, () => {
+        queryClient.invalidateQueries({ queryKey: [...MY_TICKETS_KEY, user.email] });
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'support_messages' }, () => {
+        queryClient.invalidateQueries({ queryKey: [...MY_TICKETS_KEY, user.email] });
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient, user?.email]);
+
   const profileMutation = useMutation({
     mutationFn: updateProfile,
     onSuccess: () => {
       toast.success('Profile updated in database');
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : 'Profile update failed';
-      toast.error(message);
+      const msg = error instanceof Error ? error.message : 'Profile update failed';
+      toast.error(msg);
     },
   });
 
@@ -80,6 +142,7 @@ export default function ProfilePage() {
     queryKey: [...MY_TICKETS_KEY, user?.email],
     queryFn: () => fetchUserTickets(user?.email ?? ''),
     enabled: Boolean(user?.email),
+    refetchOnWindowFocus: true,
   });
 
   const sendTicket = useMutation({
@@ -92,6 +155,76 @@ export default function ProfilePage() {
       setMessage('');
     },
     onError: () => toast.error('Failed to send request'),
+  });
+
+  const sendReply = useMutation({
+    mutationFn: sendTicketMessage,
+    onMutate: async (payload) => {
+      if (!user?.email) return { previous: [] as SupportTicket[] };
+      const key = [...MY_TICKETS_KEY, user.email];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = (queryClient.getQueryData(key) as SupportTicket[] | undefined) ?? [];
+      queryClient.setQueryData(key, withOptimisticMessage(previous, payload.id, payload.senderName, payload.message));
+      return { previous };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [...MY_TICKETS_KEY, user?.email] });
+      queryClient.invalidateQueries({ queryKey: ['admin-support-tickets'] });
+      toast.success('Reply sent');
+    },
+    onError: (_error, _vars, context) => {
+      if (user?.email && context?.previous) {
+        queryClient.setQueryData([...MY_TICKETS_KEY, user.email], context.previous);
+      }
+      toast.error('Failed to send reply');
+    },
+  });
+
+  const deleteChat = useMutation({
+    mutationFn: (ticketId: string) => deleteSupportTicket({ id: ticketId, actor: 'user', email: user?.email }),
+    onMutate: async (ticketId) => {
+      if (!user?.email) return { previous: [] as SupportTicket[] };
+      const key = [...MY_TICKETS_KEY, user.email];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = (queryClient.getQueryData(key) as SupportTicket[] | undefined) ?? [];
+      queryClient.setQueryData(key, previous.filter((t) => t.id !== ticketId));
+      return { previous };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [...MY_TICKETS_KEY, user?.email] });
+      queryClient.invalidateQueries({ queryKey: ['admin-support-tickets'] });
+      toast.success('Chat deleted');
+    },
+    onError: (_error, _vars, context) => {
+      if (user?.email && context?.previous) {
+        queryClient.setQueryData([...MY_TICKETS_KEY, user.email], context.previous);
+      }
+      toast.error('Failed to delete chat');
+    },
+  });
+
+  const deleteMessage = useMutation({
+    mutationFn: ({ threadId, messageId }: { threadId: string; messageId: string }) =>
+      deleteSupportMessage({ threadId, messageId, actor: 'user', email: user?.email }),
+    onMutate: async ({ threadId, messageId }) => {
+      if (!user?.email) return { previous: [] as SupportTicket[] };
+      const key = [...MY_TICKETS_KEY, user.email];
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = (queryClient.getQueryData(key) as SupportTicket[] | undefined) ?? [];
+      queryClient.setQueryData(key, withoutMessage(previous, threadId, messageId));
+      return { previous };
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [...MY_TICKETS_KEY, user?.email] });
+      queryClient.invalidateQueries({ queryKey: ['admin-support-tickets'] });
+      toast.success('Message deleted');
+    },
+    onError: (_error, _vars, context) => {
+      if (user?.email && context?.previous) {
+        queryClient.setQueryData([...MY_TICKETS_KEY, user.email], context.previous);
+      }
+      toast.error('Failed to delete message');
+    },
   });
 
   const onProfileSubmit = (e: FormEvent) => {
@@ -127,6 +260,24 @@ export default function ProfilePage() {
       message: message.trim(),
     });
     setIsContactOpen(false);
+  };
+
+  const onSendReply = (ticketId: string) => {
+    if (!user) return;
+    const draft = replyDrafts[ticketId]?.trim();
+    if (!draft) {
+      toast.error('Reply cannot be empty');
+      return;
+    }
+
+    sendReply.mutate({
+      id: ticketId,
+      sender: 'user',
+      senderName: user.name,
+      message: draft,
+    });
+
+    setReplyDrafts((prev) => ({ ...prev, [ticketId]: '' }));
   };
 
   return (
@@ -202,13 +353,41 @@ export default function ProfilePage() {
                 {t.status.replace('_', ' ')}
               </span>
             </div>
-            <p>{t.message}</p>
+
+            <div className="stack-sm">
+              {t.messages.map((m) => (
+                <div key={m.id} className="row-between gap-sm">
+                  <p className="muted">
+                    <strong>{m.sender === 'admin' ? 'Admin' : m.senderName}:</strong> {m.message}
+                  </p>
+                  {m.sender === 'user' ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => deleteMessage.mutate({ threadId: t.id, messageId: m.id })}
+                      disabled={deleteMessage.isPending}
+                    >
+                      <span className="icon-label"><i className="fa-solid fa-trash" aria-hidden="true" /> Delete Msg</span>
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+
             <p className="muted">Created: {t.createdAt}</p>
-            {t.adminReply ? (
-              <p className="muted">
-                <strong>Admin reply:</strong> {t.adminReply}
-              </p>
-            ) : null}
+
+            <div className="row gap-sm">
+              <Input
+                value={replyDrafts[t.id] ?? ''}
+                onChange={(e) => setReplyDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                placeholder="Reply to admin"
+              />
+              <Button onClick={() => onSendReply(t.id)} disabled={sendReply.isPending}>
+                <span className="icon-label"><i className="fa-solid fa-paper-plane" aria-hidden="true" /> Send</span>
+              </Button>
+              <Button variant="danger" onClick={() => deleteChat.mutate(t.id)} disabled={deleteChat.isPending}>
+                <span className="icon-label"><i className="fa-solid fa-trash" aria-hidden="true" /> Delete Chat</span>
+              </Button>
+            </div>
           </article>
         ))}
       </Card>

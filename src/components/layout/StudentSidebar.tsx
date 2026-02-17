@@ -7,6 +7,7 @@ const links = [
   { to: '/schedule', label: 'Schedule', icon: 'fa-solid fa-calendar-days' },
   { to: '/ai', label: 'AI Notes', icon: 'fa-solid fa-robot' },
   { to: '/analytics', label: 'Analytics', icon: 'fa-solid fa-chart-simple' },
+  { to: '/notifications', label: 'Notifications', icon: 'fa-solid fa-bell' },
   { to: '/profile', label: 'Profile', icon: 'fa-solid fa-user' },
 ];
 

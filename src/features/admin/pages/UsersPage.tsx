@@ -16,6 +16,7 @@ import {
   updateManagedUserRole,
   updateManagedUserStatus,
 } from '../api';
+import { createAdminNotification } from '../interactionsApi';
 import { ManagedUser } from '../types';
 import { UserRole } from '../../../types';
 
@@ -69,6 +70,9 @@ export default function UsersPage() {
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebouncedValue(query, 300);
   const [selectedProfile, setSelectedProfile] = useState<ManagedUser | null>(null);
+  const [selectedRecipient, setSelectedRecipient] = useState<ManagedUser | null>(null);
+  const [notifySubject, setNotifySubject] = useState('');
+  const [notifyMessage, setNotifyMessage] = useState('');
   const queryClient = useQueryClient();
 
   const usersQuery = useQuery({ queryKey: KEY, queryFn: fetchManagedUsers });
@@ -90,6 +94,19 @@ export default function UsersPage() {
       toast.success('Status updated');
     },
     onError: () => toast.error('Status update failed'),
+  });
+
+  const notifyMutation = useMutation({
+    mutationFn: createAdminNotification,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-support-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['my-support-tickets'] });
+      toast.success('Notification sent to user');
+      setSelectedRecipient(null);
+      setNotifySubject('');
+      setNotifyMessage('');
+    },
+    onError: () => toast.error('Failed to send notification'),
   });
 
   const users = usersQuery.data ?? [];
@@ -129,6 +146,23 @@ export default function UsersPage() {
 
     const nextStatus = target.status === 'active' ? 'suspended' : 'active';
     statusMutation.mutate({ userId: target.id, status: nextStatus });
+  };
+
+  const onSendNotification = () => {
+    if (!selectedRecipient) return;
+    const subject = notifySubject.trim();
+    const message = notifyMessage.trim();
+    if (!subject || !message) {
+      toast.error('Subject and message are required');
+      return;
+    }
+
+    notifyMutation.mutate({
+      toEmail: selectedRecipient.email,
+      toName: selectedRecipient.name,
+      subject,
+      message,
+    });
   };
 
   return (
@@ -207,6 +241,19 @@ export default function UsersPage() {
                           {u.status === 'active' ? 'Suspend' : 'Activate'}
                         </span>
                       </Button>
+                      <Button
+                        onClick={() => {
+                          setSelectedRecipient(u);
+                          setNotifySubject(`Message for ${u.name}`);
+                          setNotifyMessage('');
+                        }}
+                        disabled={u.email === currentUser?.email}
+                      >
+                        <span className="icon-label">
+                          <i className="fa-solid fa-bell" aria-hidden="true" />
+                          Notify
+                        </span>
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -217,6 +264,35 @@ export default function UsersPage() {
       ) : null}
 
       <ProfileModal user={selectedProfile} onClose={() => setSelectedProfile(null)} />
+      <Modal
+        isOpen={Boolean(selectedRecipient)}
+        onClose={() => setSelectedRecipient(null)}
+        title={selectedRecipient ? `Notify ${selectedRecipient.name}` : 'Notify User'}
+      >
+        <div className="stack">
+          <label>
+            Subject
+            <Input value={notifySubject} onChange={(e) => setNotifySubject(e.target.value)} placeholder="Subject" />
+          </label>
+          <label>
+            Message
+            <textarea
+              className="input textarea"
+              value={notifyMessage}
+              onChange={(e) => setNotifyMessage(e.target.value)}
+              placeholder="Message for the user"
+            />
+          </label>
+          <div className="row gap-sm">
+            <Button onClick={onSendNotification} disabled={notifyMutation.isPending}>
+              <span className="icon-label"><i className="fa-solid fa-paper-plane" aria-hidden="true" /> Send</span>
+            </Button>
+            <Button variant="secondary" onClick={() => setSelectedRecipient(null)}>
+              <span className="icon-label"><i className="fa-solid fa-xmark" aria-hidden="true" /> Cancel</span>
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </Card>
   );
 }

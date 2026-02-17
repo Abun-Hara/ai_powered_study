@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import Button from '../../../components/ui/Button';
 import Card from '../../../components/ui/Card';
 import Skeleton from '../../../components/ui/Skeleton';
+import { supabase } from '../../../lib/supabase';
 import { fetchPlatformSettings, savePlatformSettings } from '../interactionsApi';
 
 const SETTINGS_KEY = ['platform-settings'];
@@ -22,6 +23,19 @@ export default function SettingsPage() {
     setAnnouncement(settingsQuery.data.announcement);
     setDefaultTheme(settingsQuery.data.defaultTheme);
   }, [settingsQuery.data]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('platform-settings-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'platform_settings' }, () => {
+        queryClient.invalidateQueries({ queryKey: SETTINGS_KEY });
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [queryClient]);
 
   const saveMutation = useMutation({
     mutationFn: savePlatformSettings,
