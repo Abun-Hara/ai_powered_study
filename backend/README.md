@@ -7,6 +7,7 @@ This folder contains the backend partition for the AI-Powered Study Planner.
 - `backend/supabase/functions/ai-summarize/index.ts`: secure Edge Function for AI summarization.
 - `backend/.env.example`: backend environment variables for local function development.
 - `supabase/schema.sql`: database schema, RLS, storage policies, and SQL business logic.
+- `backend/server`: Node server for OpenAI summaries, chat, flashcards, and study plan.
 
 ## Setup
 
@@ -25,4 +26,3 @@ This folder contains the backend partition for the AI-Powered Study Planner.
 - Roles: `user`, `admin` in `public.users`.
 - Suspension: set `public.users.status = 'suspended'`.
 - Admin analytics: query `public.admin_system_analytics`.
-

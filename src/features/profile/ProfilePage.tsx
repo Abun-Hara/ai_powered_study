@@ -31,6 +31,18 @@ const COUNTRIES = [
   { name: 'Japan', code: '+81' },
 ];
 
+const PHONE_RULES: Record<string, { min: number; max: number; example: string }> = {
+  '+1': { min: 10, max: 10, example: '415 555 0134' },
+  '+251': { min: 9, max: 9, example: '911 234 567' },
+  '+44': { min: 10, max: 11, example: '20 7946 0958' },
+  '+91': { min: 10, max: 10, example: '98765 43210' },
+  '+234': { min: 10, max: 10, example: '801 234 5678' },
+  '+254': { min: 9, max: 9, example: '712 345 678' },
+  '+27': { min: 9, max: 9, example: '71 234 5678' },
+  '+61': { min: 9, max: 9, example: '412 345 678' },
+  '+81': { min: 10, max: 10, example: '90 1234 5678' },
+};
+
 function splitPhone(value?: string) {
   const raw = (value ?? '').trim();
   const match = raw.match(/^(\+\d{1,4})\s*(.*)$/);
@@ -42,6 +54,20 @@ function splitPhone(value?: string) {
 
 function normalizeCountryCode(code: string) {
   return COUNTRIES.some((country) => country.code === code) ? code : '+1';
+}
+
+function getPhoneRule(code: string) {
+  return PHONE_RULES[code] ?? { min: 6, max: 14, example: '123 456 789' };
+}
+
+function digitsOnly(value: string) {
+  return value.replace(/[^\d]/g, '');
+}
+
+function isValidPhone(code: string, value: string) {
+  const digits = digitsOnly(value);
+  const rule = getPhoneRule(code);
+  return digits.length >= rule.min && digits.length <= rule.max;
 }
 
 function withOptimisticMessage(tickets: SupportTicket[], threadId: string, senderName: string, message: string) {
@@ -81,6 +107,7 @@ export default function ProfilePage() {
   const [avatarUrl, setAvatarUrl] = useState('');
   const [countryCode, setCountryCode] = useState('+1');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneError, setPhoneError] = useState('');
   const [bio, setBio] = useState('');
 
   const [subject, setSubject] = useState('');
@@ -97,6 +124,7 @@ export default function ProfilePage() {
     const parsed = splitPhone(user.phone);
     setCountryCode(normalizeCountryCode(parsed.code));
     setPhoneNumber(parsed.number);
+    setPhoneError('');
     setBio(user.bio ?? '');
   }, [user]);
 
@@ -234,6 +262,14 @@ export default function ProfilePage() {
       return;
     }
 
+    if (phoneNumber.trim() && !isValidPhone(countryCode, phoneNumber)) {
+      const rule = getPhoneRule(countryCode);
+      const msg = `Phone number should be ${rule.min === rule.max ? rule.min : `${rule.min}-${rule.max}`} digits for ${countryCode}.`;
+      setPhoneError(msg);
+      toast.error('Please enter a valid phone number');
+      return;
+    }
+
     const combinedPhone = phoneNumber.trim() ? `${countryCode} ${phoneNumber.trim()}` : '';
 
     profileMutation.mutate({
@@ -316,15 +352,32 @@ export default function ProfilePage() {
           <label>
             Phone
             <div className="row gap-sm">
-              <select className="input" value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
+              <select
+                className="input"
+                value={countryCode}
+                onChange={(e) => {
+                  setCountryCode(e.target.value);
+                  setPhoneError('');
+                }}
+              >
                 {COUNTRIES.map((country) => (
                   <option key={country.code} value={country.code}>
                     {country.name} ({country.code})
                   </option>
                 ))}
               </select>
-              <Input value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="Phone number" />
+              <Input
+                value={phoneNumber}
+                onChange={(e) => {
+                  setPhoneNumber(e.target.value);
+                  if (phoneError) setPhoneError('');
+                }}
+                placeholder={`e.g. ${getPhoneRule(countryCode).example}`}
+                aria-invalid={Boolean(phoneError)}
+              />
             </div>
+            <span className="muted">Format: {countryCode} {getPhoneRule(countryCode).example} (digits only)</span>
+            {phoneError ? <span className="text-error">{phoneError}</span> : null}
           </label>
           <label>
             Bio

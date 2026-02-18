@@ -8,6 +8,10 @@ export default function AdminPage() {
     navigate(`/admin/users?filter=${filter}`);
   };
 
+  const goTo = (path: string) => {
+    navigate(path);
+  };
+
   return (
     <div className="stack-lg">
       <Card className="stack">
@@ -16,10 +20,42 @@ export default function AdminPage() {
       </Card>
 
       <section className="kpi-grid">
-        <Card><p className="muted icon-label"><i className="fa-solid fa-users" aria-hidden="true" /> Total Users</p><h3>1,284</h3></Card>
-        <Card><p className="muted icon-label"><i className="fa-solid fa-user-check" aria-hidden="true" /> Active Users Today</p><h3>982</h3></Card>
-        <Card><p className="muted icon-label"><i className="fa-solid fa-file-arrow-up" aria-hidden="true" /> Total Uploads</p><h3>8,942</h3></Card>
-        <Card><p className="muted icon-label"><i className="fa-solid fa-wand-magic-sparkles" aria-hidden="true" /> AI Summaries Generated</p><h3>54,210</h3></Card>
+        <button
+          type="button"
+          className="card interactive-card"
+          onClick={() => goTo('/admin/users')}
+          aria-label="View all users"
+        >
+          <p className="muted icon-label"><i className="fa-solid fa-users" aria-hidden="true" /> Total Users</p>
+          <h3>1,284</h3>
+        </button>
+        <button
+          type="button"
+          className="card interactive-card"
+          onClick={() => goTo('/admin/users')}
+          aria-label="View active users"
+        >
+          <p className="muted icon-label"><i className="fa-solid fa-user-check" aria-hidden="true" /> Active Users Today</p>
+          <h3>982</h3>
+        </button>
+        <button
+          type="button"
+          className="card interactive-card"
+          onClick={() => goTo('/admin/reports')}
+          aria-label="View upload reports"
+        >
+          <p className="muted icon-label"><i className="fa-solid fa-file-arrow-up" aria-hidden="true" /> Total Uploads</p>
+          <h3>8,942</h3>
+        </button>
+        <button
+          type="button"
+          className="card interactive-card"
+          onClick={() => goTo('/admin/ai-control')}
+          aria-label="View AI controls"
+        >
+          <p className="muted icon-label"><i className="fa-solid fa-wand-magic-sparkles" aria-hidden="true" /> AI Summaries Generated</p>
+          <h3>54,210</h3>
+        </button>
       </section>
 
       <section className="grid-two">
@@ -41,9 +77,18 @@ export default function AdminPage() {
 
         <Card className="stack">
           <h3 className="icon-heading"><i className="fa-solid fa-heart-pulse" aria-hidden="true" /> Platform Health</h3>
-          <article className="list-row row-between"><strong>AI Calls (24h)</strong><span>13,506</span></article>
-          <article className="list-row row-between"><strong>Flagged Files</strong><span>7</span></article>
-          <article className="list-row row-between"><strong>Platform Uptime</strong><span>99.96%</span></article>
+          <button type="button" className="list-row row-between" onClick={() => goTo('/admin/system-analytics')}>
+            <strong>AI Calls (24h)</strong>
+            <span>13,506</span>
+          </button>
+          <button type="button" className="list-row row-between" onClick={() => goTo('/admin/reports')}>
+            <strong>Flagged Files</strong>
+            <span>7</span>
+          </button>
+          <button type="button" className="list-row row-between" onClick={() => goTo('/admin/system-analytics')}>
+            <strong>Platform Uptime</strong>
+            <span>99.96%</span>
+          </button>
         </Card>
       </section>
     </div>
